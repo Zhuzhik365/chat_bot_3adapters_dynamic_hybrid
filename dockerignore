@@ -1,0 +1,16 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+*.sqlite3
+.env
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+*.ipynb_checkpoints
+node_modules/
+media/
+staticfiles/
+data/
