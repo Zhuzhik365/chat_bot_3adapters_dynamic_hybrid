@@ -17,32 +17,32 @@
         </div>
 
         <div class="selector-card">
-            <div class="selector-card-header">
-                <div>
-                    <div class="selector-title">Активные адаптеры</div>
-                    <div class="selector-subtitle">Можно включать один или несколько одновременно</div>
+            <div class="selector-card-header compact">
+                <div class="selector-title-group">
+                    <div class="selector-title">Адаптеры</div>
+                    <div class="selector-subtitle">Можно включать несколько сразу</div>
                 </div>
-                <div class="adapter-count-badge" id="adapter-count-badge">1/3</div>
+                <div class="adapter-count-badge" id="adapter-count-badge">1 / 3</div>
             </div>
 
-            <div class="consultant-selector" id="consultant-selector">
+            <div class="consultant-selector consultant-selector-grid" id="consultant-selector">
                 {% for adapter in available_adapters %}
                 <button type="button"
-                        class="consultant-btn{% if adapter.key == 'business' %} active{% endif %}"
+                        class="consultant-btn consultant-btn-square{% if adapter.key == 'business' %} active{% endif %}"
                         data-adapter="{{ adapter.key }}"
-                        aria-pressed="{% if adapter.key == 'business' %}true{% else %}false{% endif %}">
+                        aria-pressed="{% if adapter.key == 'business' %}true{% else %}false{% endif %}"
+                        title="{{ adapter.hint }}">
                     <span class="consultant-btn-icon">{{ adapter.icon }}</span>
-                    <span class="consultant-btn-content">
-                        <span class="consultant-btn-title">{{ adapter.label }}</span>
-                        <span class="consultant-btn-subtitle">{{ adapter.hint }}</span>
-                    </span>
-                    <span class="consultant-btn-check">✓</span>
+                    <span class="consultant-btn-title">{{ adapter.short_label|default:adapter.label }}</span>
                 </button>
                 {% endfor %}
             </div>
 
-            <div class="consultant-selector-summary" id="consultant-selector-summary">
-                Активен: Бизнес
+            <div class="consultant-selector-summary compact" id="consultant-selector-summary">
+                Выбрано: Бизнес
+            </div>
+            <div class="consultant-selector-hints compact" id="consultant-selector-hints">
+                Стратегия, рост и решения
             </div>
         </div>
 

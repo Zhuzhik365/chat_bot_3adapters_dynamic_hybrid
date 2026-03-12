@@ -1,15 +1,16 @@
-# AI Chatbot — Django + Google Colab
+# AI Chatbot — Django + Colab / Kaggle
 
-Веб-приложение на Django с AI-чатом и тремя LoRA-адаптерами: бизнес, юрист и психолог. Модель запускается в Google Colab или Kaggle и общается с Django через HTTP API.
+Проект с Django-интерфейсом и тремя LoRA-адаптерами: бизнес, юрист и психолог. Можно включать один адаптер или несколько одновременно, а сервер модели запускается отдельно в `colab_server.ipynb`.
 
-## Что умеет проект
+## Что улучшено в этой версии
 
-- регистрация и авторизация пользователей
-- выбор одного или нескольких адаптеров одновременно
-- динамический hybrid для комбинаций адаптеров
-- история диалогов с удалением чатов
-- дневные лимиты токенов для free/premium
-- настройка секретов и ссылок через `.env`
+- сохранён твой динамический hybrid для нескольких адаптеров
+- убран `csrf_exempt` с POST-эндпоинтов Django
+- фронтенд отправляет CSRF-токен автоматически
+- расход токенов считается по данным токенайзера на стороне model server
+- добавлена очистка ответа модели перед сохранением и выводом
+- хардкод токенов убран: секреты читаются из Kaggle Secrets, Colab Secrets, `.env` или системных переменных
+- `requirements.txt` теперь только для Django-приложения, без notebook-зависимостей
 
 ## Репозиторий
 
@@ -18,7 +19,9 @@ git clone https://github.com/Zhuzhik365/chat_bot_3adapters_dynamic_hybrid
 cd chat_bot_3adapters_dynamic_hybrid
 ```
 
-## Быстрый запуск Django
+## 1. Установка Django-приложения
+
+### Windows
 
 ```bash
 python -m venv venv
@@ -29,14 +32,18 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Для Linux / macOS:
+### Linux / macOS
 
 ```bash
+python3 -m venv venv
 source venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env
+python manage.py migrate
+python manage.py runserver
 ```
 
-## Настройка `.env`
+## 2. Настройка `.env`
 
 Пример:
 
@@ -44,35 +51,65 @@ cp .env.example .env
 DJANGO_SECRET_KEY=replace-with-your-secret-key
 DJANGO_DEBUG=True
 DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost
-COLAB_API_URL=https://your-ngrok-url/generate
-NGROK_AUTH_TOKEN=your-ngrok-auth-token
+DJANGO_CSRF_TRUSTED_ORIGINS=
+MODEL_API_URL=https://your-ngrok-url/generate
+MODEL_API_TOKEN=
+NGROK_AUTH_TOKEN=
+HUGGINGFACE_TOKEN=
+GITHUB_REPO_URL=https://github.com/Zhuzhik365/chat_bot_3adapters_dynamic_hybrid
 ```
 
-Основное:
-- `COLAB_API_URL` — URL твоего model server с `/generate`
-- `NGROK_AUTH_TOKEN` — токен ngrok, который notebook умеет брать из Kaggle Secrets, Colab Secrets, `.env` или системных переменных
-- `DJANGO_SECRET_KEY` — секретный ключ Django
+Главное:
+- `MODEL_API_URL` или `COLAB_API_URL` — адрес model server c `/generate`
+- `MODEL_API_TOKEN` — необязательный общий секрет между Django и notebook
+- `DJANGO_SECRET_KEY` — секрет Django
+- `DJANGO_CSRF_TRUSTED_ORIGINS` — нужен, если фронт будет идти через другой домен
 
-## Запуск notebook
-
-1. Открой `colab_server.ipynb` в Colab
-2. Включи GPU
-3. Запусти все ячейки
-4. Возьми URL из вывода и вставь его в `.env` как `COLAB_API_URL`
-5. Перезапусти Django, если ссылка изменилась
-
-Notebook уже настроен под репозиторий:
+Сгенерировать Django secret key:
 
 ```bash
-https://github.com/Zhuzhik365/chat_bot_3adapters_dynamic_hybrid
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
-## Структура
+## 3. Запуск `colab_server.ipynb`
+
+Notebook сам ставит **свои** зависимости и не использует `requirements.txt`. Это специально, чтобы зависимости Django и ноутбука не мешали друг другу на macOS / Linux / Windows.
+
+Что нужно сделать:
+1. открыть `colab_server.ipynb`
+2. включить GPU
+3. задать секреты одним из способов:
+   - Kaggle Secrets
+   - Colab Secrets
+   - `.env`
+   - системные переменные окружения
+4. запустить все ячейки
+5. взять ngrok URL и вставить его в `.env` как `MODEL_API_URL`
+
+Поддерживаемые секреты:
+- `NGROK_AUTH_TOKEN` или `NGROK_TOKEN`
+- `HUGGINGFACE_TOKEN`
+- `MODEL_API_TOKEN`
+- `GITHUB_REPO_URL`
+
+## 4. Защита POST-запросов
+
+В этой версии:
+- POST-запросы к Django больше не `csrf_exempt`
+- фронтенд использует CSRF-cookie Django
+- model server может дополнительно проверять `MODEL_API_TOKEN`, если ты его задашь
+
+## 5. Подсчёт токенов
+
+Django теперь берёт `total_tokens`, `prompt_tokens` и `response_tokens` из ответа notebook. Если notebook их не вернул, используется мягкий fallback-расчёт.
+
+## 6. Структура проекта
 
 ```text
-chat/                          Django-приложение
-chatbot_project/settings.py    настройки через .env
-colab_server.ipynb             model server с 3 адаптерами
-requirements.txt               зависимости проекта
-.env.example                   шаблон env
+chat/
+chatbot_project/
+colab_server.ipynb
+requirements.txt
+.env.example
+README.md
 ```

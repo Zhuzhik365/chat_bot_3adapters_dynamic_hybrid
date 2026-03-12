@@ -1,12 +1,16 @@
-import requests
 import json
-from django.shortcuts import render, redirect, get_object_or_404
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.contrib.auth import authenticate, login, logout
-from django.contrib.auth.models import User
-from django.contrib.auth.decorators import login_required
+import re
+
+import requests
 from django.conf import settings
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_POST
+
 from .models import Conversation, Message
 
 
@@ -16,6 +20,30 @@ def _resolve_selected_adapters(data):
         data.get('adapters'),
         consultant=data.get('consultant', Conversation.CONSULTANT_BUSINESS),
     )
+
+
+def estimate_tokens_fallback(*parts: str) -> int:
+    text = ' '.join(part for part in parts if part)
+    if not text:
+        return 0
+    words = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+    return max(1, int(len(words) * 1.3))
+
+
+def clean_ai_response(text: str) -> str:
+    if not text:
+        return ''
+
+    cleaned = str(text)
+    cleaned = re.sub(r'<think>.*?</think>', '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(r'</?think>', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<\|im_start\|>assistant\s*', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<\|im_end\|>', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<\|endoftext\|>', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<\|[^>]+\|>', '', cleaned)
+    cleaned = re.sub(r'^\s*assistant\s*:\s*', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
 
 
 def login_view(request):
@@ -86,28 +114,26 @@ def chat_view(request):
     })
 
 
-@csrf_exempt
 @login_required(login_url='/login/')
+@require_POST
 def new_conversation(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-        except (json.JSONDecodeError, AttributeError):
-            data = {}
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, AttributeError):
+        data = {}
 
-        selected_adapters = _resolve_selected_adapters(data)
-        conv = Conversation(user=request.user, title='Новый чат')
-        conv.set_selected_adapters(selected_adapters)
-        conv.save()
+    selected_adapters = _resolve_selected_adapters(data)
+    conv = Conversation(user=request.user, title='Новый чат')
+    conv.set_selected_adapters(selected_adapters)
+    conv.save()
 
-        return JsonResponse({
-            'conversation_id': conv.id,
-            'title': conv.title,
-            'consultant': conv.consultant,
-            'selected_adapters': conv.get_selected_adapters(),
-            'status': 'success'
-        })
-    return JsonResponse({'error': 'Method not allowed'}, status=405)
+    return JsonResponse({
+        'conversation_id': conv.id,
+        'title': conv.title,
+        'consultant': conv.consultant,
+        'selected_adapters': conv.get_selected_adapters(),
+        'status': 'success'
+    })
 
 
 @login_required(login_url='/login/')
@@ -137,22 +163,17 @@ def get_conversation_messages(request, conversation_id):
     })
 
 
-@csrf_exempt
 @login_required(login_url='/login/')
+@require_POST
 def delete_conversation(request, conversation_id):
-    if request.method == 'POST':
-        conv = get_object_or_404(Conversation, id=conversation_id, user=request.user)
-        conv.delete()
-        return JsonResponse({'status': 'ok'})
-    return JsonResponse({'error': 'Method not allowed'}, status=405)
+    conv = get_object_or_404(Conversation, id=conversation_id, user=request.user)
+    conv.delete()
+    return JsonResponse({'status': 'ok'})
 
 
-@csrf_exempt
 @login_required(login_url='/login/')
+@require_POST
 def send_message(request):
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Метод не разрешен', 'status': 'error'}, status=405)
-
     try:
         data = json.loads(request.body)
         user_message = data.get('message', '').strip()
@@ -192,29 +213,43 @@ def send_message(request):
         if is_first_message:
             conversation.title = user_message[:60] + ('...' if len(user_message) > 60 else '')
 
+        if not settings.MODEL_API_URL:
+            return JsonResponse({
+                'error': 'MODEL_API_URL не настроен. Укажи адрес сервера модели в .env.',
+                'status': 'error'
+            }, status=503)
+
+        headers = {}
+        if settings.MODEL_API_TOKEN:
+            headers['X-Model-Api-Key'] = settings.MODEL_API_TOKEN
+
         try:
             response = requests.post(
-                settings.COLAB_API_URL,
+                settings.MODEL_API_URL,
                 json={
                     'message': user_message,
                     'history': history,
                     'consultant': conversation.consultant,
                     'adapters': conversation.get_selected_adapters(),
                 },
-                timeout=90
+                headers=headers,
+                timeout=180,
             )
 
             if response.status_code == 200:
                 response_data = response.json()
-                ai_response = response_data.get('response', '')
+                ai_response = clean_ai_response(response_data.get('response', ''))
 
                 if not ai_response:
                     return JsonResponse({'error': 'Модель вернула пустой ответ', 'status': 'error'}, status=500)
 
                 Message.objects.create(conversation=conversation, role='assistant', content=ai_response)
 
-                tokens_estimate = max(1, (len(user_message) + len(ai_response)) // 4)
-                profile.tokens_used_today += tokens_estimate
+                total_tokens = response_data.get('total_tokens')
+                if not isinstance(total_tokens, int) or total_tokens <= 0:
+                    total_tokens = estimate_tokens_fallback(user_message, ai_response)
+
+                profile.tokens_used_today += total_tokens
                 profile.save(update_fields=['tokens_used_today'])
 
                 conversation.save()
@@ -226,18 +261,30 @@ def send_message(request):
                     'consultant': conversation.consultant,
                     'selected_adapters': conversation.get_selected_adapters(),
                     'tokens_remaining': profile.tokens_remaining(),
+                    'tokens_used': profile.tokens_used_today,
+                    'token_usage': {
+                        'total_tokens': total_tokens,
+                        'prompt_tokens': response_data.get('prompt_tokens'),
+                        'response_tokens': response_data.get('response_tokens'),
+                    },
                     'status': 'success'
                 })
-            else:
+
+            if response.status_code == 403:
                 return JsonResponse(
-                    {'error': f'Ошибка сервера модели: {response.status_code}', 'status': 'error'},
-                    status=500
+                    {'error': 'Сервер модели отклонил запрос. Проверь MODEL_API_TOKEN.', 'status': 'error'},
+                    status=502,
                 )
 
+            return JsonResponse(
+                {'error': f'Ошибка сервера модели: {response.status_code}', 'status': 'error'},
+                status=500,
+            )
+
         except requests.exceptions.Timeout:
-            return JsonResponse({'error': 'Превышено время ожидания', 'status': 'error'}, status=504)
+            return JsonResponse({'error': 'Превышено время ожидания ответа модели', 'status': 'error'}, status=504)
         except requests.exceptions.ConnectionError:
-            return JsonResponse({'error': 'Не удалось подключиться к модели', 'status': 'error'}, status=503)
+            return JsonResponse({'error': 'Не удалось подключиться к серверу модели', 'status': 'error'}, status=503)
 
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Неверный формат данных', 'status': 'error'}, status=400)
