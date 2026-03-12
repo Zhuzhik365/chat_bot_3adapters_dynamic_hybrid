@@ -67,9 +67,27 @@ class Conversation(models.Model):
     ]
 
     ADAPTER_CATALOG = [
-        {'key': CONSULTANT_BUSINESS, 'label': 'Бизнес', 'name': 'Бизнес-консультант', 'icon': '💼'},
-        {'key': CONSULTANT_LEGAL, 'label': 'Юрист', 'name': 'Юридический консультант', 'icon': '⚖️'},
-        {'key': CONSULTANT_PSYCH, 'label': 'Психолог', 'name': 'Предпринимательский психолог', 'icon': '🧠'},
+        {
+            'key': CONSULTANT_BUSINESS,
+            'label': 'Бизнес',
+            'name': 'Бизнес-консультант',
+            'icon': '💼',
+            'hint': 'Стратегия, рост и решения',
+        },
+        {
+            'key': CONSULTANT_LEGAL,
+            'label': 'Юрист',
+            'name': 'Юридический консультант',
+            'icon': '⚖️',
+            'hint': 'Риски, договоры и право',
+        },
+        {
+            'key': CONSULTANT_PSYCH,
+            'label': 'Психолог',
+            'name': 'Предпринимательский психолог',
+            'icon': '🧠',
+            'hint': 'Стресс, мотивация и фокус',
+        },
     ]
     SUPPORTED_ADAPTERS = [item['key'] for item in ADAPTER_CATALOG]
     LEGACY_CONSULTANT_TO_ADAPTERS = {
